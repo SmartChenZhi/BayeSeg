@@ -1,26 +1,22 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from efficientunet import get_efficientunet_b2
 
 from .Basic_module import Criterion, Visualization
 from .ResNet import ResNet_appearance, ResNet_shape
-from .Unet import UNet
+from .vqUnet import vqUNet
 
 
-class BayeSeg(nn.Module):
+class vqBayeSeg(nn.Module):
     def __init__(self, args):
-        super(BayeSeg, self).__init__()
+        super(vqBayeSeg, self).__init__()
 
         self.args = args
         self.num_classes = args.num_classes
 
         self.res_shape = ResNet_shape(num_out_ch=2)
         self.res_appear = ResNet_appearance(num_out_ch=2, num_block=6, bn=True)
-        # self.unet = get_efficientunet_b2(
-        #     out_channels=2 * args.num_classes, pretrained=False
-        # )
-        self.unet = UNet(args,base_channels=45,output_channels=4,input_channels=3)
+        self.vqunet = vqUNet(args,base_channels=45,output_channels=4,input_channels=1)
 
         self.softmax = nn.Softmax(dim=1)
 
@@ -51,20 +47,21 @@ class BayeSeg(nn.Module):
         return x, mu_x, log_var_x
 
     def generate_z(self, x):
-        #feature = self.unet(x.repeat(1, 3, 1, 1))
-        feature = self.unet(x.repeat(1, 3, 1, 1))["pred_masks"]
+        output = self.vqunet(x.repeat(1, 1, 1, 1))
+        feature = output["pred_masks"]
         mu_z, log_var_z = torch.chunk(feature, 2, dim=1)
         log_var_z = torch.clamp(log_var_z, -20, 0)
         z, _ = self.sample_normal_jit(mu_z, log_var_z)
         if self.training:
-            return F.gumbel_softmax(z, dim=1), F.gumbel_softmax(mu_z, dim=1), log_var_z
+            return F.gumbel_softmax(z, dim=1), F.gumbel_softmax(mu_z, dim=1), log_var_z, output
         else:
-            return self.softmax(z), self.softmax(mu_z), log_var_z
+            return self.softmax(z), self.softmax(mu_z), log_var_z, output
 
     def forward(self, samples: torch.Tensor):
         x, mu_x, log_var_x = self.generate_x(samples)
         m, mu_m, log_var_m = self.generate_m(samples)
-        z, mu_z, log_var_z = self.generate_z(x)
+        z, mu_z, log_var_z, outputz = self.generate_z(x)
+        
 
         K = self.num_classes
         _, _, W, H = samples.shape
@@ -160,6 +157,7 @@ class BayeSeg(nn.Module):
             ),
             "shape_boundary": mu_upsilon_hat,
             "seg_boundary": mu_omega_hat[:, 1:2, ...],
+            "x_recon":outputz["x_recon"],
         }
 
         pred = z if self.training else mu_z
@@ -177,14 +175,18 @@ class BayeSeg(nn.Module):
             "omega": mu_omega_hat * digamma_pi,
             "upsilon": mu_upsilon_hat * mu_z,
             "visualize": visualize,
+            "x_recon":outputz["x_recon"],
+            "vq_loss":outputz["vq_loss"],
+            "x":mu_x,
         }
         return out
 
 
-class BayeSeg_Criterion(Criterion):
+class vqBayeSeg_Criterion(Criterion):
     def __init__(self, args):
-        super(BayeSeg_Criterion, self).__init__(args)
+        super(vqBayeSeg_Criterion, self).__init__(args)
         self.bayes_loss_coef = args.bayes_loss_coef
+        self.mse = nn.MSELoss()
 
     def loss_Bayes(self, outputs):
         N = outputs["normalization"]
@@ -207,6 +209,9 @@ class BayeSeg_Criterion(Criterion):
 
         return loss_Bayes
 
+    def loss_recon(self, outputs):
+        return self.mse(outputs["x_recon"],outputs["x"])
+
     def forward(self, pred, grnd):
         loss_dict = {
             "loss_Dice_CE": self.compute_dice_ce_loss(pred["pred_masks"], grnd),
@@ -215,16 +220,18 @@ class BayeSeg_Criterion(Criterion):
             "rho": torch.mean(pred["rho"]),
             "omega": torch.mean(pred["omega"]),
             "upsilon": torch.mean(pred["upsilon"]),
+            "loss_vq": pred["vq_loss"],
+            "loss_recon": self.loss_recon(pred),
         }
         losses = (
-            loss_dict["loss_Dice_CE"] + self.bayes_loss_coef * loss_dict["loss_Bayes"]
+            loss_dict["loss_Dice_CE"] + self.bayes_loss_coef * loss_dict["loss_Bayes"] + loss_dict["loss_recon"]
         )
         return losses, loss_dict
 
 
-class BayeSegVis(Visualization):
+class vqBayeSegVis(Visualization):
     def __init__(self):
-        super(BayeSegVis, self).__init__()
+        super(vqBayeSegVis, self).__init__()
 
     def forward(self, inputs, outputs, labels, others, epoch, writer):
         self.save_image(inputs.as_tensor(), "inputs", epoch, writer)
@@ -235,7 +242,7 @@ class BayeSegVis(Visualization):
 
 
 def build(args):
-    model = BayeSeg(args)
-    criterion = BayeSeg_Criterion(args)
-    visualizer = BayeSegVis()
+    model = vqBayeSeg(args)
+    criterion = vqBayeSeg_Criterion(args)
+    visualizer = vqBayeSegVis()
     return model, criterion, visualizer

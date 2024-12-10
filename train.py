@@ -135,8 +135,11 @@ class Trainer:
             datatime = time.time() - start
 
             outputs = self.model(samples)
-            losses, loss_dict = self.criterion(outputs, targets)
-
+            if self.args.model in ("vqUNet"):
+                losses, loss_dict = self.criterion(outputs, targets, samples)
+            else:
+                losses, loss_dict = self.criterion(outputs, targets)
+            
             if not torch.isfinite(losses):
                 print("Loss is {}, stopping training".format(losses))
                 print(loss_dict)
@@ -194,7 +197,11 @@ class Trainer:
             datatime = time.time() - start
 
             outputs = self.model(samples)
-            losses, loss_dict = self.criterion(outputs, targets)
+            if self.args.model in ("vqUNet"):
+                losses, loss_dict = self.criterion(outputs, targets, samples)
+            else:
+                losses, loss_dict = self.criterion(outputs, targets)
+            
 
             metric_logger.update(loss=losses.item(), **loss_dict)
             metric_logger.update(lr=self.optimizer.param_groups[0]["lr"])
@@ -228,8 +235,10 @@ class Trainer:
         self.writer.add_scalar("loss_total", stats["loss"], self.epoch)
         self.writer.add_scalar("Dice", stats["Dice"], self.epoch)
         self.writer.add_scalar("loss_Dice_CE", stats["loss_Dice_CE"], self.epoch)
-
-        self.writer.add_scalar("loss_Bayes", stats["loss_Bayes"], self.epoch)
+        if self.args.model in ("vqUNet","vqBayeSeg"):
+            self.writer.add_scalar("loss_recon", stats["loss_recon"], self.epoch)
+            self.writer.add_scalar("loss_vq", stats["loss_vq"], self.epoch)
+        
         self.visualizer(
             torch.stack(sample_list),
             torch.stack(output_list),

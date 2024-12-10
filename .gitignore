@@ -1,3 +1,10 @@
 .vscode
 .DS_Store
 */__pycache__/*
+Processed_data_nii
+log*
+A
+B
+runs
+*/__pycache__
+__pycache__

@@ -47,7 +47,7 @@ class Tester:
         self.model.to(self.device)
         self.model_type = args.model
 
-        checkpoint_path = os.path.join(self.checkpoint_dir, "checkpoint1200.pth")
+        checkpoint_path = os.path.join(self.checkpoint_dir, "best_checkpoint.pth")
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
         self.model.load_state_dict(checkpoint["model"])
 
@@ -111,12 +111,12 @@ class Tester:
             if site == "RUNMC":
                 file_paths = glob(
                     os.path.join(
-                        self.args.dataset_dir, "Prostate", site, "test", "*.nii.gz"
+                        self.args.dataset_dir, site, "test", "*.nii.gz"
                     )
                 )
             else:
                 file_paths = glob(
-                    os.path.join(self.args.dataset_dir, "Prostate", site, "*.nii.gz")
+                    os.path.join(self.args.dataset_dir, site, "*.nii.gz")
                 )
 
             image_paths, label_paths = [], []
