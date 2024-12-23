@@ -25,7 +25,7 @@ def build_Prostate(image_set, args):
 
     image_paths, label_paths = sorted(image_paths), sorted(label_paths)
     path_dicts = [
-        {"image": image_path, "label": label_path}
+        {"image": image_path, "label": label_path, "ori_image": image_path}
         for image_path, label_path in zip(image_paths, label_paths)
     ]
 
@@ -34,12 +34,14 @@ def build_Prostate(image_set, args):
         slice_transform = slice_transform_train
     elif image_set == "val":
         slice_transform = slice_transform_valid
+    elif image_set == "test":
+        slice_transform = slice_transform_valid    
 
     dataset = CacheDataset(
         data=path_dicts, transform=volume_transform, cache_rate=1.0, num_workers=4
     )
     slice_sampler = FilterSliced(
-        ["image", "label"], source_key="label", samples_per_image=12
+        ["image", "label", "ori_image"], source_key="label", samples_per_image=12
     )
     slice_dataset = PatchDataset(dataset, slice_sampler, 12, slice_transform)
     return slice_dataset

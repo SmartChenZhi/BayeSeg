@@ -13,8 +13,11 @@ from monai.transforms import (
     CenterSpatialCropd,
     Resized,
     NormalizeIntensityd,
+    ScaleIntensityd,
     Spacingd,
     Rand2DElasticd,
+    ScaleIntensityRanged,
+    Invertd,
 )
 
 
@@ -104,58 +107,62 @@ class FilterSliced(MapTransform):
 
 volume_transform = Compose(
     [
-        LoadImaged(keys=["image", "label"], image_only=False, ensure_channel_first=True),
+        LoadImaged(keys=["image", "label", "ori_image"], image_only=False, ensure_channel_first=True),
         Spacingd(
-            keys=["image", "label"],
+            keys=["image", "label", "ori_image"],
             pixdim=(0.36458, 0.36458, -1),
-            mode=("bilinear", "nearest"),
+            mode=("bilinear", "nearest","bilinear"),
         ),
-        ClipHistogram(keys=["image"], percentile=0.995),
+        ClipHistogram(keys=["image", "ori_image"], percentile=0.995),
         Orientationd(
-            keys=["image", "label"], axcodes="PLS"
+            keys=["image", "label", "ori_image"], axcodes="PLS"
         ),  # orientation after spacing
         Mask2To1d(keys=["label"]),
-        CenterSpatialCropd(keys=["image", "label"], roi_size=[384, 384, -1]),
+        CenterSpatialCropd(keys=["image", "label", "ori_image"], roi_size=[384, 384, -1]),
     ]
 )
 
 slice_transform_train = Compose(
     [
         Resized(
-            keys=["image", "label"],
+            keys=["image", "label", "ori_image"],
             spatial_size=[192, 192],
-            mode=("bilinear", "nearest"),
+            mode=("bilinear", "nearest","bilinear"),
         ),
         RandAffined(
-            keys=["image", "label"],
-            mode=("bilinear", "nearest"),
+            keys=["image", "label", "ori_image"],
+            mode=("bilinear", "nearest","bilinear"),
             prob=0.5,
             rotate_range=(3.14 / 6, 3.14 / 6),
             scale_range=(0.2, 0.2),
             translate_range=(10, 10),
         ),
         Rand2DElasticd(
-            keys=["image", "label"],
+            keys=["image", "label", "ori_image"],
             spacing=(20, 20),
             magnitude_range=(1, 2),
             prob=0.5,
             padding_mode="zeros",
-            mode=("bilinear", "nearest"),
+            mode=("bilinear", "nearest","bilinear"),
         ),
-        NormalizeIntensityd(keys=["image"]),
+        NormalizeIntensityd(keys=["image", "ori_image"]),
+        #ScaleIntensityRanged(keys=["image"], a_min=0, a_max=1000, b_min=0.0, b_max=1.0, clip=True),   
         RandGaussianNoised(keys=["image"], prob=0.5, std=0.5),
-        ToTensord(keys=["image", "label"]),
+        #ScaleIntensityd(keys=["image","ori_image"], minv=0., maxv=1.),
+        ToTensord(keys=["image", "label", "ori_image"]),
     ]
 )
 
 slice_transform_valid = Compose(
     [
         Resized(
-            keys=["image", "label"],
+            keys=["image", "label", "ori_image"],
             spatial_size=[192, 192],
-            mode=("bilinear", "nearest"),
+            mode=("bilinear", "nearest","bilinear"),
         ),
-        NormalizeIntensityd(keys=["image"]),
-        ToTensord(keys=["image", "label"]),
+        NormalizeIntensityd(keys=["image", "ori_image"]),
+        #ScaleIntensityRanged(keys=["image"], a_min=0, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
+        #ScaleIntensityd(keys=["image", "ori_image"], minv=0., maxv=1.),
+        ToTensord(keys=["image", "label", "ori_image"]),
     ]
 )

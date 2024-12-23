@@ -135,8 +135,10 @@ class Trainer:
             datatime = time.time() - start
 
             outputs = self.model(samples)
-            if self.args.model in ("vqUNet"):
+            if self.args.model == "vqUNet":
                 losses, loss_dict = self.criterion(outputs, targets, samples)
+            elif self.args.model == "vqvae":
+                losses, loss_dict = self.criterion(outputs, samples)
             else:
                 losses, loss_dict = self.criterion(outputs, targets)
             
@@ -197,8 +199,10 @@ class Trainer:
             datatime = time.time() - start
 
             outputs = self.model(samples)
-            if self.args.model in ("vqUNet"):
+            if self.args.model == "vqUNet":
                 losses, loss_dict = self.criterion(outputs, targets, samples)
+            elif self.args.model == "vqvae":
+                losses, loss_dict = self.criterion(outputs, samples)
             else:
                 losses, loss_dict = self.criterion(outputs, targets)
             
@@ -232,12 +236,15 @@ class Trainer:
         self.logger.info("Averaged stats:")
         self.logger.info(metric_logger)
         stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-        self.writer.add_scalar("loss_total", stats["loss"], self.epoch)
-        self.writer.add_scalar("Dice", stats["Dice"], self.epoch)
-        self.writer.add_scalar("loss_Dice_CE", stats["loss_Dice_CE"], self.epoch)
-        if self.args.model in ("vqUNet","vqBayeSeg"):
+        if self.args.model != "vqvae":
+            self.writer.add_scalar("loss_total", stats["loss"], self.epoch)
+            self.writer.add_scalar("Dice", stats["Dice"], self.epoch)
+            self.writer.add_scalar("loss_Dice_CE", stats["loss_Dice_CE"], self.epoch)
+        if self.args.model in ("vqUNet","vqBayeSeg","vqvae"):
             self.writer.add_scalar("loss_recon", stats["loss_recon"], self.epoch)
             self.writer.add_scalar("loss_vq", stats["loss_vq"], self.epoch)
+        if self.args.model == "vqvae":
+            self.writer.add_scalar("PSNR", stats["Dice"], self.epoch)
         
         self.visualizer(
             torch.stack(sample_list),

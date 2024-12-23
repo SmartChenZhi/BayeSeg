@@ -24,10 +24,10 @@ def add_experiment_args(parser: ArgumentParser) -> None:
 
 
 def add_management_args(parser: ArgumentParser) -> None:
-    parser.add_argument("--output_dir", default="./logs/model")
+    parser.add_argument("--output_dir", default="./logs/model_scaletransform", type=str)
     parser.add_argument(
         "--device",
-        default="cuda",
+        default="cuda:1",
         type=str,
         help="device to use for training / testing",
     )

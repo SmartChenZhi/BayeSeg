@@ -18,6 +18,8 @@ from monai.transforms import (
     Invertd,
     Resized,
     NormalizeIntensityd,
+    ScaleIntensityRanged,
+    ScaleIntensityd,
     Spacingd,
     Transposed,
     ToDeviced,
@@ -80,6 +82,8 @@ class Tester:
                 Resized(keys="image", spatial_size=[192, 192, -1], mode=("trilinear")),
                 Transposed(keys="image", indices=[3, 0, 1, 2]),
                 NormalizeIntensityd(keys=["image", "ori_image"], channel_wise=True),
+                #ScaleIntensityRanged(keys=["image", "ori_image"], a_min=0, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
+                ScaleIntensityd(keys=["image", "ori_image"], minv=0., maxv=1.),
                 ToDeviced(keys="image", device=self.device),
             ]
         )
