@@ -14,7 +14,10 @@ def build_Prostate(image_set, args):
         args.dataset_dir
     ), f"provided data path {args.dataset_dir} does not exist"
 
-    file_paths = glob(os.path.join(args.dataset_dir, "RUNMC", image_set, "*.nii.gz"))
+    if image_set == "target":
+        file_paths = glob(os.path.join(args.dataset_dir, "BIDMC", "train", "*.nii.gz"))
+    else:
+        file_paths = glob(os.path.join(args.dataset_dir, "RUNMC", image_set, "*.nii.gz"))
 
     image_paths, label_paths = [], []
     for path in file_paths:
@@ -36,6 +39,8 @@ def build_Prostate(image_set, args):
         slice_transform = slice_transform_valid
     elif image_set == "test":
         slice_transform = slice_transform_valid    
+    elif image_set == "target":
+        slice_transform = slice_transform_train
 
     dataset = CacheDataset(
         data=path_dicts, transform=volume_transform, cache_rate=1.0, num_workers=4

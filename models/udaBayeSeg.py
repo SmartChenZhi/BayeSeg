@@ -1,22 +1,32 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from efficientunet import get_efficientunet_b2
 
 from .Basic_module import Criterion, Visualization
 from .ResNet import ResNet_appearance, ResNet_shape
-from .vqUnet import vqUNet
+from .Unet import UNet
 
 
-class vqBayeSeg(nn.Module):
+class udaBayeSeg(nn.Module):
     def __init__(self, args):
-        super(vqBayeSeg, self).__init__()
+        super(udaBayeSeg, self).__init__()
 
         self.args = args
         self.num_classes = args.num_classes
 
         self.res_shape = ResNet_shape(num_out_ch=2)
-        self.res_appear = ResNet_appearance(num_out_ch=2, num_block=6, bn=True)
-        self.vqunet = vqUNet(args,base_channels=45,output_channels=4,input_channels=1)
+        self.res_appear_s = ResNet_appearance(num_out_ch=2, num_block=6, bn=True)
+        self.res_appear_t = ResNet_appearance(num_out_ch=2, num_block=6, bn=True)
+        # self.unet = get_efficientunet_b2(
+        #     out_channels=2 * args.num_classes, pretrained=False
+        # )
+        self.unet = UNet(args,base_channels=45,output_channels=4,input_channels=1)
+        self.unet_teacher = UNet(args,base_channels=45,output_channels=4,input_channels=1)
+        self.unet_teacher.load_state_dict(self.unet.state_dict())  # 初始同步
+        self.ema_decay = args.ema_decay
+        for param in self.unet_teacher.parameters():
+            param.requires_grad = False
 
         self.softmax = nn.Softmax(dim=1)
 
@@ -24,11 +34,15 @@ class vqBayeSeg(nn.Module):
         Dx[:, :, 1, 1] = 1
         Dx[:, :, 1, 0] = Dx[:, :, 1, 2] = Dx[:, :, 0, 1] = Dx[:, :, 2, 1] = -1 / 4
         self.Dx = nn.Parameter(data=Dx, requires_grad=False)
-        if args.pretrain:
-            self.load_pretrained_parts("logs/model2/best_checkpoint.pth")
+
+        #self.load_pretrained_parts("logs/model2/best_checkpoint.pth")
+
+    def update_teacher(self):
+        # 用 EMA 更新教师模型参数
+        for student_param, teacher_param in zip(self.unet.parameters(), self.unet_teacher.parameters()):
+            teacher_param.data.mul_(self.ema_decay).add_((1 - self.ema_decay) * student_param.data)
 
 
-    
     def load_pretrained_parts(self, checkpoint_path):
         for param in self.res_shape.parameters():
             param.requires_grad = False
@@ -54,8 +68,15 @@ class vqBayeSeg(nn.Module):
         z = eps.mul_(sigma).add_(mu)
         return z, eps
 
-    def generate_m(self, samples):
-        feature = self.res_appear(samples)
+    def generate_m_t(self, samples):
+        feature = self.res_appear_t(samples)
+        mu_m, log_var_m = torch.chunk(feature, 2, dim=1)
+        log_var_m = torch.clamp(log_var_m, -20, 0)
+        m, _ = self.sample_normal_jit(mu_m, log_var_m)
+        return m, mu_m, log_var_m
+
+    def generate_m_s(self, samples):
+        feature = self.res_appear_s(samples)
         mu_m, log_var_m = torch.chunk(feature, 2, dim=1)
         log_var_m = torch.clamp(log_var_m, -20, 0)
         m, _ = self.sample_normal_jit(mu_m, log_var_m)
@@ -68,21 +89,32 @@ class vqBayeSeg(nn.Module):
         x, _ = self.sample_normal_jit(mu_x, log_var_x)
         return x, mu_x, log_var_x
 
-    def generate_z(self, x,ori_samples):
-        output = self.vqunet(x,ori_samples)
-        feature = output["pred_masks"]
+    def generate_z(self, x):
+        feature = self.unet(x)["pred_masks"]
         mu_z, log_var_z = torch.chunk(feature, 2, dim=1)
         log_var_z = torch.clamp(log_var_z, -20, 0)
         z, _ = self.sample_normal_jit(mu_z, log_var_z)
         if self.training:
-            return F.gumbel_softmax(z, dim=1), F.gumbel_softmax(mu_z, dim=1), log_var_z, output
+            return F.gumbel_softmax(z, dim=1), F.gumbel_softmax(mu_z, dim=1), log_var_z
         else:
-            return self.softmax(z), self.softmax(mu_z), log_var_z, output
+            return self.softmax(z), self.softmax(mu_z), log_var_z
+        
+    def generate_z_dummy(self, x):
+        feature = self.unet_teacher(x)["pred_masks"]
+        mu_z, log_var_z = torch.chunk(feature, 2, dim=1)
+        log_var_z = torch.clamp(log_var_z, -20, 0)
+        z, _ = self.sample_normal_jit(mu_z, log_var_z)
+        return self.softmax(z), self.softmax(mu_z), log_var_z
 
-    def forward(self, samples: torch.Tensor, ori_samples:torch.Tensor):
+    def getoutput(self, samples: torch.Tensor, isSource):
         x, mu_x, log_var_x = self.generate_x(samples)
-        m, mu_m, log_var_m = self.generate_m(samples)
-        z, mu_z, log_var_z, outputz = self.generate_z(x,ori_samples)
+        if isSource:
+            m, mu_m, log_var_m = self.generate_m_s(samples)
+            z, mu_z, log_var_z = self.generate_z(x)
+        else:
+            m, mu_m, log_var_m = self.generate_m_t(samples)
+            z, mu_z, log_var_z = self.generate_z(x)
+            z_dummy, mu_z_dummy, log_var_z_dummy = self.generate_z_dummy(x)
         
 
         K = self.num_classes
@@ -179,7 +211,6 @@ class vqBayeSeg(nn.Module):
             ),
             "shape_boundary": mu_upsilon_hat,
             "seg_boundary": mu_omega_hat[:, 1:2, ...],
-            "x_recon":outputz["x_recon"],
         }
 
         pred = z if self.training else mu_z
@@ -197,18 +228,22 @@ class vqBayeSeg(nn.Module):
             "omega": mu_omega_hat * digamma_pi,
             "upsilon": mu_upsilon_hat * mu_z,
             "visualize": visualize,
-            "x_recon":outputz["x_recon"],
-            "vq_loss":outputz["vq_loss"],
         }
+        if not isSource:
+            out["dummy_label"] = mu_z_dummy
+        return out
+    
+    def forward(self, samples: torch.Tensor, samples_t: torch.Tensor):
+        out_s = self.getoutput(samples, True)
+        out_t = self.getoutput(samples_t, False)
+        out = [out_s,out_t]
         return out
 
 
-class vqBayeSeg_Criterion(Criterion):
+class udaBayeSeg_Criterion(Criterion):
     def __init__(self, args):
-        super(vqBayeSeg_Criterion, self).__init__(args)
+        super(udaBayeSeg_Criterion, self).__init__(args)
         self.bayes_loss_coef = args.bayes_loss_coef
-        self.recon_loss_coef = args.recon_loss_coef
-        self.mse = nn.MSELoss()
 
     def loss_Bayes(self, outputs):
         N = outputs["normalization"]
@@ -231,10 +266,9 @@ class vqBayeSeg_Criterion(Criterion):
 
         return loss_Bayes
 
-    def loss_recon(self, outputs,ori_samples):
-        return self.mse(outputs["x_recon"],ori_samples)
-
-    def forward(self, pred, grnd,ori_samples):
+    def forward(self, out, grnd):
+        pred = out[0]
+        pred_t = out[1]
         loss_dict = {
             "loss_Dice_CE": self.compute_dice_ce_loss(pred["pred_masks"], grnd),
             "Dice": self.compute_dice(pred["pred_masks"], grnd),
@@ -242,21 +276,18 @@ class vqBayeSeg_Criterion(Criterion):
             "rho": torch.mean(pred["rho"]),
             "omega": torch.mean(pred["omega"]),
             "upsilon": torch.mean(pred["upsilon"]),
-            "loss_vq": pred["vq_loss"],
-            "loss_recon": self.loss_recon(pred,ori_samples),
+            "loss_Dice_CE_t": self.compute_dice_ce_loss(pred_t["pred_masks"], pred_t["dummy_label"]),
+            "loss_Bayes_t": self.loss_Bayes(pred_t),
         }
         losses = (
-            loss_dict["loss_Dice_CE"] + self.bayes_loss_coef * loss_dict["loss_Bayes"] + self.recon_loss_coef * (loss_dict["loss_recon"] + loss_dict["loss_vq"])
+            loss_dict["loss_Dice_CE"] + 0.1 * loss_dict["loss_Dice_CE_t"] + self.bayes_loss_coef * (loss_dict["loss_Bayes"] + loss_dict["loss_Bayes_t"])
         )
-        # losses = (
-        #     loss_dict["loss_Dice_CE"]/loss_dict["loss_Dice_CE"].detach() + loss_dict["loss_Bayes"]/loss_dict["loss_Bayes"].detach() + loss_dict["loss_recon"]/loss_dict["loss_recon"].detach() + loss_dict["loss_vq"]/loss_dict["loss_vq"].detach()
-        # )
         return losses, loss_dict
 
 
-class vqBayeSegVis(Visualization):
+class udaBayeSegVis(Visualization):
     def __init__(self):
-        super(vqBayeSegVis, self).__init__()
+        super(udaBayeSegVis, self).__init__()
 
     def forward(self, inputs, outputs, labels, others, epoch, writer):
         self.save_image(inputs.as_tensor(), "inputs", epoch, writer)
@@ -267,7 +298,7 @@ class vqBayeSegVis(Visualization):
 
 
 def build(args):
-    model = vqBayeSeg(args)
-    criterion = vqBayeSeg_Criterion(args)
-    visualizer = vqBayeSegVis()
+    model = udaBayeSeg(args)
+    criterion = udaBayeSeg_Criterion(args)
+    visualizer = udaBayeSegVis()
     return model, criterion, visualizer

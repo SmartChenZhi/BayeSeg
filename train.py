@@ -77,6 +77,19 @@ class Trainer:
             pin_memory=True,
         )
 
+        if args.uda:
+            self.logger.info("Building target dataset...")
+            dataset_target = build_dataset(image_set="target", args=args)
+            self.logger.info("Number of target images: {}".format(len(dataset_target)))
+
+            self.target_loader = DataLoader(
+                dataset_target,
+                args.batch_size,
+                True,
+                num_workers=args.num_workers,
+                pin_memory=True,
+            )
+
         if args.resume:
             checkpoint = torch.load(args.resume, map_location="cpu")
             self.model.load_state_dict(checkpoint["model"])
@@ -125,18 +138,33 @@ class Trainer:
 
         total_step = len(self.train_loader)
         train_iterator = iter(self.train_loader)
+        if self.args.uda:
+            target_iterator = iter(self.target_loader)
         start_time = time.time()
 
         for step in range(total_step):
             start = time.time()
             data_dict = next(train_iterator)
             samples = data_dict["image"].to(self.device)
+            ori_samples = data_dict["ori_image"].to(self.device)
             targets = data_dict["label"].to(self.device)
             datatime = time.time() - start
 
-            outputs = self.model(samples)
-            if self.args.model == "vqUNet":
-                losses, loss_dict = self.criterion(outputs, targets, samples)
+            if self.args.model == "vqBayeSeg":
+                outputs = self.model(samples,ori_samples)
+            elif self.args.uda:
+                try:
+                    target_data_dict = next(target_iterator)
+                except StopIteration:
+                    # 重新创建迭代器
+                    target_iterator = iter(self.target_loader)
+                    target_data_dict = next(target_iterator)
+                samples_t = target_data_dict["image"].to(self.device)
+                outputs = self.model(samples,samples_t)
+            else:
+                outputs = self.model(samples)
+            if self.args.model == "vqUNet" or self.args.model == "vqBayeSeg":
+                losses, loss_dict = self.criterion(outputs, targets, ori_samples)
             elif self.args.model == "vqvae":
                 losses, loss_dict = self.criterion(outputs, samples)
             else:
@@ -151,6 +179,11 @@ class Trainer:
             losses.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
+
+            # 更新教师模型
+            if self.args.uda:
+                self.model.update_teacher()
+
 
             metric_logger.update(loss=losses.item(), **loss_dict)
             metric_logger.update(lr=self.optimizer.param_groups[0]["lr"])
@@ -195,12 +228,16 @@ class Trainer:
             start = time.time()
             data_dict = next(valid_iterator)
             samples = data_dict["image"].to(self.device)
+            ori_samples = data_dict["ori_image"].to(self.device)
             targets = data_dict["label"].to(self.device)
             datatime = time.time() - start
 
-            outputs = self.model(samples)
-            if self.args.model == "vqUNet":
-                losses, loss_dict = self.criterion(outputs, targets, samples)
+            if self.args.model == "vqBayeSeg":
+                outputs = self.model(samples,ori_samples)
+            else:
+                outputs = self.model(samples)
+            if self.args.model == "vqUNet" or self.args.model == "vqBayeSeg":
+                losses, loss_dict = self.criterion(outputs, targets, ori_samples)
             elif self.args.model == "vqvae":
                 losses, loss_dict = self.criterion(outputs, samples)
             else:

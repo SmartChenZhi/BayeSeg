@@ -3,6 +3,7 @@ from .vqBayeSeg import build as build_vqBayeSeg
 from .vqUnet import build as build_vqUNet
 from .Unet import build as build_UNet
 from .VqVae import build as build_vqvae
+from .udaBayeSeg import build as build_udaBayeSeg
 
 def build_model(args):
     if args.model == "BayeSeg":
@@ -15,5 +16,7 @@ def build_model(args):
         return build_UNet(args)
     elif args.model == "vqvae":
         return build_vqvae(args)
+    elif args.model == "udaBayeSeg":
+        return build_udaBayeSeg(args)
     else:
         raise ValueError("invalid model:{}".format(args.model))

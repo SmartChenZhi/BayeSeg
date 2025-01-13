@@ -29,6 +29,27 @@ class BayeSeg(nn.Module):
         Dx[:, :, 1, 0] = Dx[:, :, 1, 2] = Dx[:, :, 0, 1] = Dx[:, :, 2, 1] = -1 / 4
         self.Dx = nn.Parameter(data=Dx, requires_grad=False)
 
+        self.load_pretrained_parts("logs/model2/best_checkpoint.pth")
+
+
+    def load_pretrained_parts(self, checkpoint_path):
+        for param in self.res_shape.parameters():
+            param.requires_grad = False
+        for param in self.res_appear.parameters():
+            param.requires_grad = False
+
+        # Load checkpoint
+        checkpoint = torch.load(checkpoint_path)
+
+        # Extract model state_dict
+        pretrained_state_dict = checkpoint["model"]
+
+        # Load res_shape and res_appear weights
+        self.res_shape.load_state_dict({k.replace("res_shape.", ""): v 
+                                        for k, v in pretrained_state_dict.items() if k.startswith("res_shape.")})
+        self.res_appear.load_state_dict({k.replace("res_appear.", ""): v 
+                                         for k, v in pretrained_state_dict.items() if k.startswith("res_appear.")})
+
     @staticmethod
     def sample_normal_jit(mu, log_var):
         sigma = torch.exp(log_var / 2)

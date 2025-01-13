@@ -18,6 +18,7 @@ from data.transform import (
     slice_transform_valid,
     FilterSliced,
 )
+from monai.transforms import ScaleIntensity
 
 
 def build_Prostate(image_set, dataset_dir):
@@ -107,16 +108,20 @@ class VQVAE(nn.Module):
         # 编码器
         self.encoder = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),  # 96x96x32
-            nn.BatchNorm2d(32),
+            #nn.BatchNorm2d(32),
+            nn.InstanceNorm2d(32),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1), # 48x48x64
-            nn.BatchNorm2d(64),
+            #nn.BatchNorm2d(64),
+            nn.InstanceNorm2d(64),
             nn.ReLU(),
             nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),  # 24x24x128
-            nn.BatchNorm2d(128),
+            #nn.BatchNorm2d(128),
+            nn.InstanceNorm2d(128),
             nn.ReLU(),
             nn.Conv2d(128, embedding_dim, kernel_size=4, stride=2, padding=1),  # 12x12xembedding_dim
-            nn.BatchNorm2d(embedding_dim),
+            #nn.BatchNorm2d(embedding_dim),
+            nn.InstanceNorm2d(embedding_dim),
             #nn.ReLU(),
         
         )
@@ -127,20 +132,24 @@ class VQVAE(nn.Module):
         # 解码器
         self.decoder = nn.Sequential(
             nn.ConvTranspose2d(embedding_dim, 128, kernel_size=4, stride=2, padding=1), # 24
-            nn.BatchNorm2d(128),
+            #nn.BatchNorm2d(128),
+            nn.InstanceNorm2d(128),
             nn.ReLU(),
             nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1), # 48
-            nn.BatchNorm2d(64),
+            #nn.BatchNorm2d(64),
+            nn.InstanceNorm2d(64),
             nn.ReLU(),
             nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),  # 96
-            nn.BatchNorm2d(32),
+            #nn.BatchNorm2d(32),
+            nn.InstanceNorm2d(32),
             nn.ReLU(),
             nn.ConvTranspose2d(32, 1, kernel_size=4, stride=2, padding=1),   # 192
-            #nn.Sigmoid()
+            #nn.ReLU(),
+            nn.Sigmoid()
         )
 
         # 初始化权重
-        self.initialize_weights()
+        #self.initialize_weights()
 
     def initialize_weights(self):
         for m in self.modules():
@@ -210,7 +219,19 @@ class VQVAEVis(Visualization):
         for key, value in others.items():
             self.save_image(value.float().as_tensor(), key, epoch, writer)
 
-
+def scale(batch_tensor):
+    normalized_images = []
+    for image in batch_tensor:
+        # 逐图片获取最小值和最大值
+        xmin = image.min()
+        xmax = image.max()
+        # 避免除以零
+        if xmax - xmin > 0:
+            normalized_image = (image - xmin) / (xmax - xmin)
+        else:
+            normalized_image = image - xmin  # 如果 xmax == xmin，则全设为0
+        normalized_images.append(normalized_image)
+    return torch.stack(normalized_images)
 
 def build(args):
     model = VQVAE()
@@ -242,7 +263,7 @@ if __name__ == "__main__":
     device = torch.device("cuda:0")
     model = VQVAE().to(device)
     optimizer = optim.Adam(model.parameters(), lr=3e-3, weight_decay=1e-5)
-    scheduler = StepLR(optimizer, step_size=50, gamma=0.3)
+    scheduler = StepLR(optimizer, step_size=50, gamma=0.5)
 
     # 训练循环
     writer = SummaryWriter("runs/vqvae_experiment2")
@@ -280,9 +301,9 @@ if __name__ == "__main__":
             # TensorBoard 记录
             if batch_idx % 240 == 0:
                 writer.add_scalar("Loss/train", loss.item(), epoch * len(train_loader) + batch_idx)
-                writer.add_images("Train/Input", data.cpu(), epoch * len(train_loader) + batch_idx)
-                writer.add_images("Train/Recon", recon_data.cpu(), epoch * len(train_loader) + batch_idx)
-                writer.add_images("Train/Ori", ori_data.cpu(), epoch * len(train_loader) + batch_idx)
+                writer.add_images("Train/Input", scale(data).cpu(), epoch * len(train_loader) + batch_idx)
+                writer.add_images("Train/Recon", scale(recon_data).cpu(), epoch * len(train_loader) + batch_idx)
+                writer.add_images("Train/Ori", scale(ori_data).cpu(), epoch * len(train_loader) + batch_idx)
         
         scheduler.step()
         # 打印当前学习率（可选）
@@ -323,10 +344,10 @@ if __name__ == "__main__":
         writer.add_scalar("Loss/avg_val_loss", avg_val_loss, epoch + 1)
 
         # 每个 epoch 记录验证集的输入和输出
-        writer.add_images("Test/Input", data.cpu(), epoch + 1)
-        writer.add_images("Test/Output", recon_data.cpu(), epoch + 1)
-        writer.add_images("Val/Input", data_val.cpu(), epoch + 1)
-        writer.add_images("Val/Output", recon_data_val.cpu(), epoch + 1)
+        writer.add_images("Test/Input", scale(data).cpu(), epoch + 1)
+        writer.add_images("Test/Output", scale(recon_data).cpu(), epoch + 1)
+        writer.add_images("Val/Input", scale(data_val).cpu(), epoch + 1)
+        writer.add_images("Val/Output", scale(recon_data_val).cpu(), epoch + 1)
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {avg_train_loss:.4f}, Test Loss: {avg_test_loss:.4f},  Avg Val Loss: {avg_val_loss:.4f}")
         if epoch>=400 and epoch %50 ==0:

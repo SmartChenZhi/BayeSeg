@@ -49,9 +49,10 @@ class Tester:
         self.model.to(self.device)
         self.model_type = args.model
 
-        checkpoint_path = os.path.join(self.checkpoint_dir, "best_checkpoint.pth")
+        checkpoint_path = os.path.join(self.checkpoint_dir, "checkpoint1200.pth")
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
         self.model.load_state_dict(checkpoint["model"])
+        print("best epoch:",checkpoint["epoch"])
 
         n_parameters = sum(
             p.numel() for p in self.model.parameters() if p.requires_grad
@@ -71,20 +72,20 @@ class Tester:
                     keys=["image", "label", "ori_image"], source_key="label"
                 ),
                 Spacingd(
-                    keys="image", pixdim=(0.36458, 0.36458, -1), mode=("bilinear")
+                    keys=["image", "ori_image"], pixdim=(0.36458, 0.36458, -1), mode=("bilinear")
                 ),
-                ClipHistogram(keys="image", percentile=0.995),
+                ClipHistogram(keys=["image", "ori_image"], percentile=0.995),
                 Orientationd(
                     keys=["image", "label", "ori_image"], axcodes="PLS"
                 ),  # orientation after spacing
                 Mask2To1d(keys="label"),
-                CenterSpatialCropd(keys="image", roi_size=[384, 384, -1]),
-                Resized(keys="image", spatial_size=[192, 192, -1], mode=("trilinear")),
-                Transposed(keys="image", indices=[3, 0, 1, 2]),
-                NormalizeIntensityd(keys=["image", "ori_image"], channel_wise=True),
+                CenterSpatialCropd(keys=["image", "ori_image"], roi_size=[384, 384, -1]),
+                Resized(keys=["image", "ori_image"], spatial_size=[192, 192, -1], mode=("trilinear")),
+                Transposed(keys=["image", "ori_image"], indices=[3, 0, 1, 2]),
+                NormalizeIntensityd(keys=["image"], channel_wise=True),
                 #ScaleIntensityRanged(keys=["image", "ori_image"], a_min=0, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
-                ScaleIntensityd(keys=["image", "ori_image"], minv=0., maxv=1.),
-                ToDeviced(keys="image", device=self.device),
+                ScaleIntensityd(keys=["ori_image"], minv=0., maxv=1.),
+                ToDeviced(keys=["image", "ori_image"], device=self.device),
             ]
         )
 
@@ -104,6 +105,7 @@ class Tester:
     @torch.no_grad()
     def test_prostate(self):
         site_list = ["RUNMC", "BMC", "BIDMC", "HK", "UCL", "I2CVB"]
+        #site_list = ["RUNMC", "BMC", "HK", "UCL", "I2CVB"]
         results_list = []
         for site in site_list:
             if self.visualize:
@@ -140,7 +142,11 @@ class Tester:
             for i, path_dict in enumerate(path_dicts):
                 data_dict = self.preprocess(path_dict)
 
-                outputs = self.model(data_dict["image"])
+                if self.args.model == "vqBayeSeg":
+                    outputs = self.model(data_dict["image"],data_dict["ori_image"])
+                else:
+                    outputs = self.model(data_dict["image"])
+                #outputs = self.model(data_dict["image"],data_dict["ori_image"])
                 data_dict["pred"] = outputs["pred_masks"]
 
                 data_dict = self.post_pred(data_dict)
@@ -149,7 +155,8 @@ class Tester:
                 patient_dices.append(self.dice_metric.aggregate())
                 self.dice_metric.reset()
 
-                if i == 0 and self.visualize:
+                #if i == 0 and self.visualize:
+                if self.visualize:
                     # visualize
                     pred = torch.argmax(
                         data_dict["pred"].permute(1, 2, 3, 0), dim=0, keepdim=True
@@ -167,42 +174,45 @@ class Tester:
                         every_n=1,
                         frame_dim=-1,
                         channel_dim=0,
-                        show=True,
+                        show=False,
                     )
-                    plt.savefig(os.path.join(visual_dir, "img_lab_pred.png"))
+                    file_name = "img_lab_pred_" + str(i) + ".png"
+                    out_path = os.path.join(visual_dir, file_name)
+                    print(out_path)
+                    plt.savefig(out_path)
 
-                    img_num = data_dict["pred"].shape[-1]
-                    shape = outputs["visualize"]["shape"][:img_num].permute(1, 2, 3, 0)
-                    lines = outputs["visualize"]["shape_boundary"].permute(1, 2, 3, 0)
-                    omega = outputs["visualize"]["seg_boundary"].permute(1, 2, 3, 0)
+                    # img_num = data_dict["pred"].shape[-1]
+                    # shape = outputs["visualize"]["shape"][:img_num].permute(1, 2, 3, 0)
+                    # lines = outputs["visualize"]["shape_boundary"].permute(1, 2, 3, 0)
+                    # omega = outputs["visualize"]["seg_boundary"].permute(1, 2, 3, 0)
 
-                    matshow3d(
-                        shape,
-                        figsize=(50, 50),
-                        every_n=1,
-                        frame_dim=-1,
-                        show=True,
-                        cmap="gray",
-                    )
-                    plt.savefig(os.path.join(visual_dir, "shape.png"))
-                    matshow3d(
-                        lines,
-                        figsize=(50, 50),
-                        every_n=1,
-                        frame_dim=-1,
-                        show=True,
-                        cmap="gray",
-                    )
-                    plt.savefig(os.path.join(visual_dir, "shape_boundary.png"))
-                    matshow3d(
-                        omega,
-                        figsize=(50, 50),
-                        every_n=1,
-                        frame_dim=-1,
-                        show=True,
-                        cmap="gray",
-                    )
-                    plt.savefig(os.path.join(visual_dir, "seg_boundary.png"))
+                    # matshow3d(
+                    #     shape,
+                    #     figsize=(50, 50),
+                    #     every_n=1,
+                    #     frame_dim=-1,
+                    #     show=False,
+                    #     cmap="gray",
+                    # )
+                    # plt.savefig(os.path.join(visual_dir, "shape.png"))
+                    # matshow3d(
+                    #     lines,
+                    #     figsize=(50, 50),
+                    #     every_n=1,
+                    #     frame_dim=-1,
+                    #     show=False,
+                    #     cmap="gray",
+                    # )
+                    # plt.savefig(os.path.join(visual_dir, "shape_boundary.png"))
+                    # matshow3d(
+                    #     omega,
+                    #     figsize=(50, 50),
+                    #     every_n=1,
+                    #     frame_dim=-1,
+                    #     show=False,
+                    #     cmap="gray",
+                    # )
+                    # plt.savefig(os.path.join(visual_dir, "seg_boundary.png"))
 
             # compute dice
             patient_dices = torch.vstack(patient_dices) * 100

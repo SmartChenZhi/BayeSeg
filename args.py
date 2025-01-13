@@ -10,6 +10,9 @@ def add_experiment_args(parser: ArgumentParser) -> None:
     parser.add_argument("--lr_drop", default=1000, type=int)
     parser.add_argument("--num_classes", default=2, type=int)
     parser.add_argument("--checkpoint_dir", default="logs/model", type=str)
+    parser.add_argument("--pretrain", action="store_true", help="Enable pretraining")
+    parser.add_argument("--ema_decay", default=0.99, type=float)
+    parser.add_argument("--uda", action="store_true", help="Enable uda")
 
     # Model parameters
     parser.add_argument("--model", default="BayeSeg", required=False)
@@ -21,6 +24,7 @@ def add_experiment_args(parser: ArgumentParser) -> None:
     parser.add_argument("--ce_loss_coef", default=1, type=float)
     parser.add_argument("--dice_loss_coef", default=0, type=float)
     parser.add_argument("--bayes_loss_coef", default=100, type=float)
+    parser.add_argument("--recon_loss_coef", default=1, type=float)
 
 
 def add_management_args(parser: ArgumentParser) -> None:

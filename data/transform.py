@@ -145,10 +145,10 @@ slice_transform_train = Compose(
             padding_mode="zeros",
             mode=("bilinear", "nearest","bilinear"),
         ),
-        NormalizeIntensityd(keys=["image", "ori_image"]),
+        NormalizeIntensityd(keys=["image"]),
         #ScaleIntensityRanged(keys=["image"], a_min=0, a_max=1000, b_min=0.0, b_max=1.0, clip=True),   
         RandGaussianNoised(keys=["image"], prob=0.5, std=0.5),
-        #ScaleIntensityd(keys=["image","ori_image"], minv=0., maxv=1.),
+        ScaleIntensityd(keys=["ori_image"], minv=0., maxv=1.),
         ToTensord(keys=["image", "label", "ori_image"]),
     ]
 )
@@ -160,9 +160,9 @@ slice_transform_valid = Compose(
             spatial_size=[192, 192],
             mode=("bilinear", "nearest","bilinear"),
         ),
-        NormalizeIntensityd(keys=["image", "ori_image"]),
+        NormalizeIntensityd(keys=["image"]),
         #ScaleIntensityRanged(keys=["image"], a_min=0, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
-        #ScaleIntensityd(keys=["image", "ori_image"], minv=0., maxv=1.),
+        ScaleIntensityd(keys=["ori_image"], minv=0., maxv=1.),
         ToTensord(keys=["image", "label", "ori_image"]),
     ]
 )
