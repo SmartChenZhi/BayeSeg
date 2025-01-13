@@ -231,6 +231,19 @@ class udaBayeSeg(nn.Module):
         }
         if not isSource:
             out["dummy_label"] = mu_z_dummy
+            out["visualize"] = {
+                "shape_t": torch.concat([x, mu_x, torch.exp(log_var_x / 2)]),
+                "appearance_t": torch.concat([n, m, 1 / mu_rho_hat.sqrt()]),
+                "logit_t": torch.concat(
+                    [
+                        z[:, 1:2, ...],
+                        mu_z[:, 1:2, ...],
+                        torch.exp(log_var_z / 2)[:, 1:2, ...],
+                    ]
+                ),
+                "shape_boundary_t": mu_upsilon_hat,
+                "seg_boundary_t": mu_omega_hat[:, 1:2, ...],
+            }
         return out
     
     def forward(self, samples: torch.Tensor, samples_t: torch.Tensor):
@@ -244,6 +257,7 @@ class udaBayeSeg_Criterion(Criterion):
     def __init__(self, args):
         super(udaBayeSeg_Criterion, self).__init__(args)
         self.bayes_loss_coef = args.bayes_loss_coef
+        self.mse = nn.MSELoss()
 
     def loss_Bayes(self, outputs):
         N = outputs["normalization"]
@@ -276,7 +290,7 @@ class udaBayeSeg_Criterion(Criterion):
             "rho": torch.mean(pred["rho"]),
             "omega": torch.mean(pred["omega"]),
             "upsilon": torch.mean(pred["upsilon"]),
-            "loss_Dice_CE_t": self.compute_dice_ce_loss(pred_t["pred_masks"], pred_t["dummy_label"]),
+            "loss_Dice_CE_t": self.mse(pred_t["pred_masks"], pred_t["dummy_label"]),
             "loss_Bayes_t": self.loss_Bayes(pred_t),
         }
         losses = (
@@ -289,11 +303,15 @@ class udaBayeSegVis(Visualization):
     def __init__(self):
         super(udaBayeSegVis, self).__init__()
 
-    def forward(self, inputs, outputs, labels, others, epoch, writer):
+    def forward(self, inputs, inputs_t, outputs, outputs_t, labels, others, others_t, epoch, writer):
         self.save_image(inputs.as_tensor(), "inputs", epoch, writer)
         self.save_image(outputs.float().as_tensor(), "outputs", epoch, writer)
         self.save_image(labels.float().as_tensor(), "labels", epoch, writer)
         for key, value in others.items():
+            self.save_image(value.float().as_tensor(), key, epoch, writer)
+        self.save_image(inputs_t.as_tensor(), "inputs", epoch, writer)
+        self.save_image(outputs_t.float().as_tensor(), "outputs", epoch, writer)
+        for key, value in others_t.items():
             self.save_image(value.float().as_tensor(), key, epoch, writer)
 
 

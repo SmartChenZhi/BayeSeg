@@ -221,7 +221,10 @@ class Trainer:
 
         total_step = len(self.valid_loader)
         valid_iterator = iter(self.valid_loader)
+        target_iterator = iter(self.target_loader)
         sample_list, output_list, target_list = [], [], []
+        sample_list_t = []
+        output_list_t = []
         start_time = time.time()
 
         for step in range(total_step):
@@ -234,6 +237,15 @@ class Trainer:
 
             if self.args.model == "vqBayeSeg":
                 outputs = self.model(samples,ori_samples)
+            elif self.args.uda:
+                try:
+                    target_data_dict = next(target_iterator)
+                except StopIteration:
+                    # 重新创建迭代器
+                    target_iterator = iter(self.target_loader)
+                    target_data_dict = next(target_iterator)
+                samples_t = target_data_dict["image"].to(self.device)
+                outputs = self.model(samples,samples_t)
             else:
                 outputs = self.model(samples)
             if self.args.model == "vqUNet" or self.args.model == "vqBayeSeg":
@@ -258,10 +270,21 @@ class Trainer:
 
             if step % (max(round(total_step / 16.0), 1)) == 0:
                 sample_list.append(samples[0])
-                output_list.append(
-                    torch.argmax(outputs["pred_masks"][0], dim=0, keepdim=True)
-                )
                 target_list.append(targets[0])
+                if self.args.uda:
+                    sample_list_t.append(samples_t[0])
+                    output_list.append(
+                        torch.argmax(outputs[0]["pred_masks"][0], dim=0, keepdim=True)
+                    )
+                    output_list_t.append(
+                        torch.argmax(outputs[1]["pred_masks"][0], dim=0, keepdim=True)
+                    )
+                else:
+                    output_list.append(
+                        torch.argmax(outputs["pred_masks"][0], dim=0, keepdim=True)
+                    )
+                
+                
 
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -283,14 +306,27 @@ class Trainer:
         if self.args.model == "vqvae":
             self.writer.add_scalar("PSNR", stats["Dice"], self.epoch)
         
-        self.visualizer(
-            torch.stack(sample_list),
-            torch.stack(output_list),
-            torch.stack(target_list),
-            outputs["visualize"],
-            self.epoch,
-            self.writer,
-        )
+        if self.args.uda:
+            self.visualizer(
+                torch.stack(sample_list),
+                torch.stack(sample_list_t),
+                torch.stack(output_list),
+                torch.stack(output_list_t),
+                torch.stack(target_list),
+                outputs[0]["visualize"],
+                outputs[1]["visualize"],
+                self.epoch,
+                self.writer,
+            )
+        else:
+            self.visualizer(
+                torch.stack(sample_list),
+                torch.stack(output_list),
+                torch.stack(target_list),
+                outputs["visualize"],
+                self.epoch,
+                self.writer,
+            )
 
         return stats
 

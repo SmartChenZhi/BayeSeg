@@ -53,3 +53,8 @@ python test.py --model vqBayeSeg --checkpoint_dir logs/vqBayeSeg11 --device cuda
 
 python train.py --model udaBayeSeg --output_dir logs/udaBayeSeg --device cuda:0 --uda
 python test.py --model udaBayeSeg --checkpoint_dir logs/udaBayeSeg --device cuda:0 --uda
+tensorboard --logdir=logs/udaBayeSeg --port=6016
+
+python train.py --model udaBayeSeg --output_dir logs/udaBayeSeg2 --device cuda:1 --uda --bayes_loss_coef 50
+python test.py --model udaBayeSeg --checkpoint_dir logs/udaBayeSeg2 --device cuda:1 --uda
+tensorboard --logdir=logs/udaBayeSeg --port=6017
